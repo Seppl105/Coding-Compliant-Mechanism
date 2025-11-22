@@ -674,6 +674,8 @@ def compute_positions_mech3(angles23, O4_2_global, br23_vec):
         deltaR_loc_x * math.sin(t23) + deltaR_loc_y * math.cos(t23),
     ])
     C2R = A3 + offR  # right end
+    
+    P3 = B3 + np.array([k3L_x, k3L_y])
 
     return dict(
         O2_3=O2_3,
@@ -682,6 +684,7 @@ def compute_positions_mech3(angles23, O4_2_global, br23_vec):
         B3=B3,
         C2L=C2L,
         C2R=C2R,
+        P3=P3,
     )
 
 
@@ -888,8 +891,7 @@ for idx, (angles12, pts12, angles23, pts3, angles34, pts4) in enumerate(all_resu
              [pts3["A3"][1], pts3["B3"][1]], "--", alpha=alpha)
 
     # bottom bracket 2–3
-    plt.plot([pts12["O4_2"][0], pts3["O2_3"][0]],
-             [pts12["O4_2"][1], pts3["O2_3"][1]], ":", alpha=alpha)
+    #plt.plot([pts12["O4_2"][0], pts3["O2_3"][0]], [pts12["O4_2"][1], pts3["O2_3"][1]], ":", alpha=alpha)
 
     # coupler 2, if C2L/C2R exist
     if "C2L" in pts3 and "C2R" in pts3:
@@ -995,7 +997,7 @@ ax_anim.set_ylabel("y")
 (line_r33,) = ax_anim.plot([], [], "--g", label="r33")
 
 # Bottom bracket 2–3
-(line_br23,) = ax_anim.plot([], [], ":", color="gray", label="bracket 2–3")
+#(line_br23,) = ax_anim.plot([], [], ":", color="gray", label="bracket 2–3")
 
 # Coupler 2
 (line_c2,)   = ax_anim.plot([], [], "--", color="brown", label="c2")
