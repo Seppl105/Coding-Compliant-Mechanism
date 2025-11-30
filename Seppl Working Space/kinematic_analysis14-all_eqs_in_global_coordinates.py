@@ -369,6 +369,7 @@ def get_A1A2_initial(line21, line22):
 
 l_A1A2, t_A1A2_initial = get_A1A2_initial(sys1_links[1], sys2_links[1])
 
+
 t31_initial = math.radians(angle_deg(sys1_links[2]))  # global r31 angle
 t32_initial = math.radians(angle_deg(sys2_links[2]))  # global r32 angle
 
@@ -553,6 +554,8 @@ def solve_mechanism(t21_val, prev_guess_sys2=None):
         # local four-bar loop in system 2
         r22 * sp.cos(t22) + r32 * math.cos(t32_val) - (r12 * sp.cos(t12) + r42 * sp.cos(t42)),
         r22 * sp.sin(t22) + r32 * math.sin(t32_val) - (r12 * sp.sin(t12) + r42 * sp.sin(t42)),
+        # r22 * sp.cos(t22) + r32 * math.cos(t32_val - Phi2_val) - (r12 * sp.cos(t12) + r42 * sp.cos(t42)),
+        # r22 * sp.sin(t22) + r32 * math.sin(t32_val - Phi2_val) - (r12 * sp.sin(t12) + r42 * sp.sin(t42)),
         # connector loop, x-component
         r21 * math.cos(t21_val) + l_A1A2 * math.cos(Phi2_val) - r22 * sp.cos(t22 + Phi2_val) \
         + (k2_x * math.cos(Phi2_val) - k2_y * math.sin(Phi2_val)) \
@@ -1165,218 +1168,464 @@ coupler_links_new = [
 r11_old = [57.4614744999, -6.8091636193,
            48.6155671498, -6.4613681972]
 
-TOL = 2.0  # mm
+# ============================================================
+# DEBUG: Check solved System-2 angles vs CAD (local frame)
+# ============================================================
 
-def lines_match(l1, l2, tol):
-    p1s = np.array(l1[:2]); p1e = np.array(l1[2:])
-    p2s = np.array(l2[:2]); p2e = np.array(l2[2:])
-    if np.linalg.norm(p1s - p2s) < tol and np.linalg.norm(p1e - p2e) < tol:
-        return True
-    if np.linalg.norm(p1s - p2e) < tol and np.linalg.norm(p1e - p2s) < tol:
-        return True
-    return False
+def wrap_pi(a):
+    return (a + math.pi) % (2 * math.pi) - math.pi
 
-# --- Find r11 in the NEW point cloud ---
-r11_new = None
-mech_index = None
-line_index = None
+# --- CAD GLOBAL angles (rad)
+t12_cad_glob = math.radians(angle_deg(sys2_links[0]))
+t22_cad_glob = math.radians(angle_deg(sys2_links[1]))
+t32_cad_glob = math.radians(angle_deg(sys2_links[2]))
+t42_cad_glob = math.radians(angle_deg(sys2_links[3]))
 
-for i, mech in enumerate(four_bar_linkages_new):
-    for j, line in enumerate(mech):
-        if lines_match(r11_old, line, TOL):
-            r11_new = np.array(line, float)
-            mech_index = i
-            line_index = j
-            break
-    if r11_new is not None:
-        break
+# --- CAD LOCAL angles (rad)
+Phi2_cad = t_A1A2_initial
+t12_cad_loc = wrap_pi(t12_cad_glob - Phi2_cad)
+t22_cad_loc = wrap_pi(t22_cad_glob - Phi2_cad)
+t32_cad_loc = wrap_pi(t32_cad_glob - Phi2_cad)
+t42_cad_loc = wrap_pi(t42_cad_glob - Phi2_cad)
 
-print("r11 found in NEW mechanism:", mech_index, "line:", line_index)
-print("r11_new =", r11_new)
+# --- SOLVED LOCAL angles (rad)
+t12_sol = wrap_pi(angles12["t12"])
+t22_sol = wrap_pi(angles12["t22"])
+t32_sol = wrap_pi(angles12["t32"])   # this is already local in your model
+t42_sol = wrap_pi(angles12["t42"])
 
-# --- Get r21 from the new mechanism geometry (ordered) ---
-ordered_new = order_links_rectangular(four_bar_linkages_new[mech_index])
-r21_new_line = ordered_new[1]  # [x1,y1,x2,y2] of side link
+# --- Print comparison
+print("\n=== SYSTEM 2 ANGLE CHECK (LOCAL FRAME) ===")
+print("Angle     CAD(deg)    SOLVED(deg)    ERROR(deg)")
+print("------------------------------------------------")
 
-# angle of r21 in radians (from new point cloud)
-t21_new = math.radians(angle_deg(r21_new_line))
-print("t21_new (deg) =", math.degrees(t21_new))
+def pr(name, cad, sol):
+    print(f"{name:<6}  {math.degrees(cad):>9.4f}  {math.degrees(sol):>11.4f}  {abs(math.degrees(sol-cad)):>11.6f}")
 
-# --- Solve mechanism for this new input angle ---
-angles12_new, _ = solve_mechanism(t21_new)
-pts12_new = compute_positions(angles12_new)
-
-# Also solve for mechanisms 3–4 so you have a full configuration if needed
-O4_2_new = pts12_new["O4_2"]
-angles23_new, _ = solve_pair23(O4_2_new)
-pts3_new = compute_positions_mech3(angles23_new, O4_2_new, br23_vec)
-angles34_new, _ = solve_pair34(angles23_new["t33"],
-                               angles23_new["t23"],
-                               angles23_new["t43"])
-pts4_new = compute_positions_mech4(angles34_new, pts3_new)
-
-# ----------------------------------------------------------------
-#  Align model configuration to the NEW point cloud via r11
-# ----------------------------------------------------------------
-
-# data r11 in left->right orientation
-data_r11 = orient_left_to_right(r11_new.tolist())
-x1d, y1d, x2d, y2d = data_r11
-v_d = np.array([x2d - x1d, y2d - y1d])
-
-# model r11 in its local frame
-model_r11 = [pts12_new["O2_1"][0], pts12_new["O2_1"][1],
-             pts12_new["O4_1"][0], pts12_new["O4_1"][1]]
-model_r11 = orient_left_to_right(model_r11)
-x1m, y1m, x2m, y2m = model_r11
-v_m = np.array([x2m - x1m, y2m - y1m])
-
-theta_d = math.atan2(v_d[1], v_d[0])
-theta_m = math.atan2(v_m[1], v_m[0])
-dtheta = theta_d - theta_m
-
-R_align = np.array([[math.cos(dtheta), -math.sin(dtheta)],
-                    [math.sin(dtheta),  math.cos(dtheta)]])
-
-t_align = np.array([x1d, y1d]) - R_align @ np.array([x1m, y1m])
-
-def transform_point(p):
-    return R_align @ p + t_align
-
-def transform_pts_dict(pts):
-    return {k: transform_point(np.array(v)) for k, v in pts.items()}
-
-pts12_new_al = transform_pts_dict(pts12_new)
-pts3_new_al  = transform_pts_dict(pts3_new)
-pts4_new_al  = transform_pts_dict(pts4_new)
+pr("t12", t12_cad_loc, t12_sol)
+pr("t22", t22_cad_loc, t22_sol)
+pr("t32", t32_cad_loc, t32_sol)
+pr("t42", t42_cad_loc, t42_sol)
 
 
-# ----------------------------------------------------------------
-#  Plot: full model (aligned) vs second point cloud
-# ----------------------------------------------------------------
+###################################################################################################################################
+# ================================================================
+# 11) VERIFICATION AGAINST SECOND POINT CLOUD
+#     (append this block after r11_old definition)
+# ================================================================
+
+def joints_from_ordered_links_rect(links):
+    """
+    Given rectangular four-bar in order [r1(bottom), r2(left), r3(top), r4(right)]
+    return joint positions O2, A, O4, B as 2D numpy arrays.
+    """
+    r1, r2, r3, r4 = links
+    O2 = np.array(r1[:2], float)   # start of bottom link
+    O4 = np.array(r1[2:], float)   # end   of bottom link
+    A  = np.array(r2[2:], float)   # end   of left link
+    B  = np.array(r4[2:], float)   # end   of right link
+    return dict(O2=O2, O4=O4, A=A, B=B)
+
+# --- 11.1 Order new four-bar linkages (same helper as before) ---
+ordered_linkages_new, idx_sorted_new = sort_mechanisms_left_to_right(
+    [order_links_rectangular(l) for l in four_bar_linkages_new]
+)
+
+# also sort new couplers left->right (by midpoint x) just for plotting
+cx_mid = [0.5*(c[0] + c[2]) for c in coupler_links_new]
+coupler_links_new_sorted = [c for _, c in sorted(zip(cx_mid, coupler_links_new))]
+
+print("\n=== New four-bar linkages ordered (verification set) ===\n")
+for i, ordered in enumerate(ordered_linkages_new):
+    print(f"New Mechanism {i+1}:")
+    for j, line in enumerate(ordered, start=1):
+        name = f"r{j}{i+1}_new"
+        L = length(line)
+        ang = angle_deg(line)
+        x1, y1, x2, y2 = line
+        print(
+            f"  {name}: start=({x1:.3f}, {y1:.3f}), "
+            f"end=({x2:.3f}, {y2:.3f}), "
+            f"length={L:.3f}, angle={ang:.3f} deg"
+        )
+    print()
+
+print("New coupler links (unsorted):")
+for j, line in enumerate(coupler_links_new, start=1):
+    name = f"c{j}_new"
+    L = length(line)
+    ang = angle_deg(line)
+    x1, y1, x2, y2 = line
+    print(
+        f"  {name}: start=({x1:.3f}, {y1:.3f}), "
+        f"end=({x2:.3f}, {y2:.3f}), "
+        f"length={L:.3f}, angle={ang:.3f} deg"
+    )
+
+# --- 11.2 Extract measured input angle t21 from new mechanism 1 ---
+# Mechanism 1 new: ordered_linkages_new[0]
+# r2 is the input link O2_1 -> A1, oriented bottom->top
+r21_new_line = ordered_linkages_new[0][1]
+t21_meas_deg = angle_deg(r21_new_line)
+t21_meas_rad = math.radians(t21_meas_deg)
+
+print("\n=== Verification using new point cloud ===")
+print(f"Measured input angle t21 from new cloud: {t21_meas_deg:.3f} deg")
+
+# --- 11.3 Solve full mechanism for this measured angle ---
+angles12_ver, _ = solve_mechanism(t21_meas_rad, prev_guess_sys2=None)
+pts12_ver = compute_positions(angles12_ver)
+
+O4_2_ver_global = pts12_ver["O4_2"]
+angles23_ver, _ = solve_pair23(O4_2_ver_global, prev_guess=None)
+angles34_ver, _ = solve_pair34(
+    t33_val=angles23_ver["t33"],
+    t23_val=angles23_ver["t23"],
+    t43_val=angles23_ver["t43"],
+    prev_guess=None,
+)
+
+pts3_ver = compute_positions_mech3(angles23_ver, O4_2_ver_global, br23_vec)
+pts4_ver = compute_positions_mech4(angles34_ver, pts3_ver)
+
+# --- 11.4 Build joint positions from new point cloud ---
+joints_new = [joints_from_ordered_links_rect(links)
+              for links in ordered_linkages_new]
+
+# Mechanism 1 measured joints:
+O2_1_meas = joints_new[0]["O2"]
+
+# Predicted O2_1 from model:
+O2_1_pred = pts12_ver["O2_1"]
+
+# Align model to new cloud by pure translation so that O2_1 coincides
+T_align = O2_1_meas - O2_1_pred
+
+def shift(p):
+    """Apply alignment translation to a 2D point."""
+    return p + T_align
+
+# --- 11.5 Compute position errors (model vs new cloud) ---
+pairs = []
+
+# mech 1: O2_1, O4_1, A1, B1
+pairs += [
+    (shift(pts12_ver["O2_1"]), joints_new[0]["O2"]),
+    (shift(pts12_ver["O4_1"]), joints_new[0]["O4"]),
+    (shift(pts12_ver["A1"]),   joints_new[0]["A"]),
+    (shift(pts12_ver["B1"]),   joints_new[0]["B"]),
+]
+
+# mech 2: O2_2, O4_2, A2, B2
+pairs += [
+    (shift(pts12_ver["O2_2"]), joints_new[1]["O2"]),
+    (shift(pts12_ver["O4_2"]), joints_new[1]["O4"]),
+    (shift(pts12_ver["A2"]),   joints_new[1]["A"]),
+    (shift(pts12_ver["B2"]),   joints_new[1]["B"]),
+]
+
+# mech 3: O2_3, O4_3, A3, B3
+pairs += [
+    (shift(pts3_ver["O2_3"]), joints_new[2]["O2"]),
+    (shift(pts3_ver["O4_3"]), joints_new[2]["O4"]),
+    (shift(pts3_ver["A3"]),   joints_new[2]["A"]),
+    (shift(pts3_ver["B3"]),   joints_new[2]["B"]),
+]
+
+# mech 4: O2_4, O4_4, A4, B4
+pairs += [
+    (shift(pts4_ver["O2_4"]), joints_new[3]["O2"]),
+    (shift(pts4_ver["O4_4"]), joints_new[3]["O4"]),
+    (shift(pts4_ver["A4"]),   joints_new[3]["A"]),
+    (shift(pts4_ver["B4"]),   joints_new[3]["B"]),
+]
+
+errors = []
+for p_model, p_meas in pairs:
+    diff = p_model - p_meas
+    errors.append(np.linalg.norm(diff))
+
+errors = np.array(errors)
+rms_error = np.sqrt(np.mean(errors**2))
+max_error = np.max(errors)
+
+print(f"\nRMS position error (model vs new cloud): {rms_error:.6f}")
+print(f"Max position error:                      {max_error:.6f}")
+
+# --- 11.6 Plot overlay: model vs new point cloud ---
 plt.figure()
-plt.title("Model prediction vs second point cloud")
+plt.title("Model vs new point cloud (aligned at O2_1)")
 
-# ===== MODEL: SYSTEM 1 (aligned) =====
-plt.plot([pts12_new_al["O2_1"][0], pts12_new_al["O4_1"][0]],
-         [pts12_new_al["O2_1"][1], pts12_new_al["O4_1"][1]],
-         "-k", lw=2, label="r11 (model)")
-plt.plot([pts12_new_al["O2_1"][0], pts12_new_al["A1"][0]],
-         [pts12_new_al["O2_1"][1], pts12_new_al["A1"][1]],
-         "-b", label="r21 (model)")
-plt.plot([pts12_new_al["A1"][0], pts12_new_al["B1"][0]],
-         [pts12_new_al["A1"][1], pts12_new_al["B1"][1]],
-         "--b", label="r31 (model)")
-plt.plot([pts12_new_al["O4_1"][0], pts12_new_al["B1"][0]],
-         [pts12_new_al["O4_1"][1], pts12_new_al["B1"][1]],
-         "-g", label="r41 (model)")
+# dummy lines for legend
+plt.plot([], [], "k-", label="measured links")
+plt.plot([], [], "r-", label="model links")
 
-# ===== MODEL: SYSTEM 2 (aligned) =====
-plt.plot([pts12_new_al["O2_2"][0], pts12_new_al["O4_2"][0]],
-         [pts12_new_al["O2_2"][1], pts12_new_al["O4_2"][1]],
-         "-r", lw=2, label="r12 (model)")
-plt.plot([pts12_new_al["O2_2"][0], pts12_new_al["A2"][0]],
-         [pts12_new_al["O2_2"][1], pts12_new_al["A2"][1]],
-         "-m", label="r22 (model)")
-plt.plot([pts12_new_al["A2"][0], pts12_new_al["B2"][0]],
-         [pts12_new_al["A2"][1], pts12_new_al["B2"][1]],
-         "--m", label="r32 (model)")
-plt.plot([pts12_new_al["O4_2"][0], pts12_new_al["B2"][0]],
-         [pts12_new_al["O4_2"][1], pts12_new_al["B2"][1]],
-         "-c", label="r42 (model)")
-
-# coupler 1 (P1–P2)
-plt.plot([pts12_new_al["P1"][0], pts12_new_al["P2"][0]],
-         [pts12_new_al["P1"][1], pts12_new_al["P2"][1]],
-         "-.", color="orange", label="c1 (model)")
-
-# ===== MODEL: SYSTEM 3 (aligned) =====
-plt.plot([pts3_new_al["O2_3"][0], pts3_new_al["O4_3"][0]],
-         [pts3_new_al["O2_3"][1], pts3_new_al["O4_3"][1]],
-         "-y", lw=2, label="r13 (model)")
-plt.plot([pts3_new_al["O2_3"][0], pts3_new_al["A3"][0]],
-         [pts3_new_al["O2_3"][1], pts3_new_al["A3"][1]],
-         "-g", label="r23 (model)")
-plt.plot([pts3_new_al["A3"][0], pts3_new_al["B3"][0]],
-         [pts3_new_al["A3"][1], pts3_new_al["B3"][1]],
-         "--g", label="r33 (model)")
-plt.plot([pts3_new_al["O4_3"][0], pts3_new_al["B3"][0]],
-         [pts3_new_al["O4_3"][1], pts3_new_al["B3"][1]],
-         "-b", label="r43 (model)")
-
-# coupler 2 (C2L–C2R)
-plt.plot([pts3_new_al["C2L"][0], pts3_new_al["C2R"][0]],
-         [pts3_new_al["C2L"][1], pts3_new_al["C2R"][1]],
-         "--", color="brown", label="c2 (model)")
-
-# ===== MODEL: SYSTEM 4 (aligned) =====
-plt.plot([pts4_new_al["O2_4"][0], pts4_new_al["O4_4"][0]],
-         [pts4_new_al["O2_4"][1], pts4_new_al["O4_4"][1]],
-         "-k", lw=2, label="r14 (model)")
-plt.plot([pts4_new_al["O2_4"][0], pts4_new_al["A4"][0]],
-         [pts4_new_al["O2_4"][1], pts4_new_al["A4"][1]],
-         "-r", label="r24 (model)")
-plt.plot([pts4_new_al["A4"][0], pts4_new_al["B4"][0]],
-         [pts4_new_al["A4"][1], pts4_new_al["B4"][1]],
-         "--r", label="r34 (model)")
-plt.plot([pts4_new_al["O4_4"][0], pts4_new_al["B4"][0]],
-         [pts4_new_al["O4_4"][1], pts4_new_al["B4"][1]],
-         "-g", label="r44 (model)")
-
-# coupler 3 (P3–P4)
-plt.plot([pts3_new_al["P3"][0], pts4_new_al["P4"][0]],
-         [pts3_new_al["P3"][1], pts4_new_al["P4"][1]],
-         "-.", color="purple", label="c3 (model)")
-
-# ===== SECOND POINT CLOUD (measured) =====
-for mech in four_bar_linkages_new:
+# measured four-bar links
+for mech in ordered_linkages_new:
     for line in mech:
         x1, y1, x2, y2 = line
-        plt.plot([x1, x2], [y1, y2], color="0.7", lw=2)
+        plt.plot([x1, x2], [y1, y2], "k-", lw=1, alpha=0.6)
 
-for line in coupler_links_new:
-    x1, y1, x2, y2 = line
-    plt.plot([x1, x2], [y1, y2], color="0.5", lw=2, linestyle="--")
+# measured couplers (sorted left->right for nicer look)
+for c in coupler_links_new_sorted:
+    x1, y1, x2, y2 = c
+    plt.plot([x1, x2], [y1, y2], "k--", lw=1, alpha=0.6)
+
+def plot_segment(p_start, p_end):
+    plt.plot([p_start[0], p_end[0]],
+             [p_start[1], p_end[1]],
+             "r-", lw=2)
+
+def plot_segment_dashed(p_start, p_end):
+    plt.plot([p_start[0], p_end[0]],
+             [p_start[1], p_end[1]],
+             "r--", lw=2)
+
+# System 1 model
+plot_segment(shift(pts12_ver["O2_1"]), shift(pts12_ver["O4_1"]))
+plot_segment(shift(pts12_ver["O2_1"]), shift(pts12_ver["A1"]))
+plot_segment(shift(pts12_ver["O4_1"]), shift(pts12_ver["B1"]))
+plot_segment_dashed(shift(pts12_ver["A1"]), shift(pts12_ver["B1"]))
+
+# System 2 model
+plot_segment(shift(pts12_ver["O2_2"]), shift(pts12_ver["O4_2"]))
+plot_segment(shift(pts12_ver["O2_2"]), shift(pts12_ver["A2"]))
+plot_segment(shift(pts12_ver["O4_2"]), shift(pts12_ver["B2"]))
+plot_segment_dashed(shift(pts12_ver["A2"]), shift(pts12_ver["B2"]))
+
+# System 3 model
+plot_segment(shift(pts3_ver["O2_3"]), shift(pts3_ver["O4_3"]))
+plot_segment(shift(pts3_ver["O2_3"]), shift(pts3_ver["A3"]))
+plot_segment(shift(pts3_ver["O4_3"]), shift(pts3_ver["B3"]))
+plot_segment_dashed(shift(pts3_ver["A3"]), shift(pts3_ver["B3"]))
+
+# System 4 model
+plot_segment(shift(pts4_ver["O2_4"]), shift(pts4_ver["O4_4"]))
+plot_segment(shift(pts4_ver["O2_4"]), shift(pts4_ver["A4"]))
+plot_segment(shift(pts4_ver["O4_4"]), shift(pts4_ver["B4"]))
+plot_segment_dashed(shift(pts4_ver["A4"]), shift(pts4_ver["B4"]))
 
 plt.axis("equal")
 plt.grid(True, ls=":")
-plt.legend(loc="upper right", fontsize=8)
+plt.xlabel("x")
+plt.ylabel("y")
+plt.legend(loc="best")
 plt.tight_layout()
 plt.show()
+
+
+# TOL = 2.0  # mm
+
+# def lines_match(l1, l2, tol):
+#     p1s = np.array(l1[:2]); p1e = np.array(l1[2:])
+#     p2s = np.array(l2[:2]); p2e = np.array(l2[2:])
+#     if np.linalg.norm(p1s - p2s) < tol and np.linalg.norm(p1e - p2e) < tol:
+#         return True
+#     if np.linalg.norm(p1s - p2e) < tol and np.linalg.norm(p1e - p2s) < tol:
+#         return True
+#     return False
+
+# # --- Find r11 in the NEW point cloud ---
+# r11_new = None
+# mech_index = None
+# line_index = None
+
+# for i, mech in enumerate(four_bar_linkages_new):
+#     for j, line in enumerate(mech):
+#         if lines_match(r11_old, line, TOL):
+#             r11_new = np.array(line, float)
+#             mech_index = i
+#             line_index = j
+#             break
+#     if r11_new is not None:
+#         break
+
+# print("r11 found in NEW mechanism:", mech_index, "line:", line_index)
+# print("r11_new =", r11_new)
+
+# # --- Get r21 from the new mechanism geometry (ordered) ---
+# ordered_new = order_links_rectangular(four_bar_linkages_new[mech_index])
+# r21_new_line = ordered_new[1]  # [x1,y1,x2,y2] of side link
+
+# # angle of r21 in radians (from new point cloud)
+# t21_new = math.radians(angle_deg(r21_new_line))
+# print("t21_new (deg) =", math.degrees(t21_new))
+
+# # --- Solve mechanism for this new input angle ---
+# angles12_new, _ = solve_mechanism(t21_new)
+# pts12_new = compute_positions(angles12_new)
+
+# # Also solve for mechanisms 3–4 so you have a full configuration if needed
+# O4_2_new = pts12_new["O4_2"]
+# angles23_new, _ = solve_pair23(O4_2_new)
+# pts3_new = compute_positions_mech3(angles23_new, O4_2_new, br23_vec)
+# angles34_new, _ = solve_pair34(angles23_new["t33"],
+#                                angles23_new["t23"],
+#                                angles23_new["t43"])
+# pts4_new = compute_positions_mech4(angles34_new, pts3_new)
+
 # # ----------------------------------------------------------------
-# #  Plot: model (aligned) vs second point cloud
+# #  Align model configuration to the NEW point cloud via r11
+# # ----------------------------------------------------------------
+
+# # data r11 in left->right orientation
+# data_r11 = orient_left_to_right(r11_new.tolist())
+# x1d, y1d, x2d, y2d = data_r11
+# v_d = np.array([x2d - x1d, y2d - y1d])
+
+# # model r11 in its local frame
+# model_r11 = [pts12_new["O2_1"][0], pts12_new["O2_1"][1],
+#              pts12_new["O4_1"][0], pts12_new["O4_1"][1]]
+# model_r11 = orient_left_to_right(model_r11)
+# x1m, y1m, x2m, y2m = model_r11
+# v_m = np.array([x2m - x1m, y2m - y1m])
+
+# theta_d = math.atan2(v_d[1], v_d[0])
+# theta_m = math.atan2(v_m[1], v_m[0])
+# dtheta = theta_d - theta_m
+
+# R_align = np.array([[math.cos(dtheta), -math.sin(dtheta)],
+#                     [math.sin(dtheta),  math.cos(dtheta)]])
+
+# t_align = np.array([x1d, y1d]) - R_align @ np.array([x1m, y1m])
+
+# def transform_point(p):
+#     return R_align @ p + t_align
+
+# def transform_pts_dict(pts):
+#     return {k: transform_point(np.array(v)) for k, v in pts.items()}
+
+# pts12_new_al = transform_pts_dict(pts12_new)
+# pts3_new_al  = transform_pts_dict(pts3_new)
+# pts4_new_al  = transform_pts_dict(pts4_new)
+
+
+# # ----------------------------------------------------------------
+# #  Plot: full model (aligned) vs second point cloud
 # # ----------------------------------------------------------------
 # plt.figure()
 # plt.title("Model prediction vs second point cloud")
 
-# # --- plot NEW point cloud in gray ---
+# # ===== MODEL: SYSTEM 1 (aligned) =====
+# plt.plot([pts12_new_al["O2_1"][0], pts12_new_al["O4_1"][0]],
+#          [pts12_new_al["O2_1"][1], pts12_new_al["O4_1"][1]],
+#          "-k", lw=2, label="r11 (model)")
+# plt.plot([pts12_new_al["O2_1"][0], pts12_new_al["A1"][0]],
+#          [pts12_new_al["O2_1"][1], pts12_new_al["A1"][1]],
+#          "-b", label="r21 (model)")
+# plt.plot([pts12_new_al["A1"][0], pts12_new_al["B1"][0]],
+#          [pts12_new_al["A1"][1], pts12_new_al["B1"][1]],
+#          "--b", label="r31 (model)")
+# plt.plot([pts12_new_al["O4_1"][0], pts12_new_al["B1"][0]],
+#          [pts12_new_al["O4_1"][1], pts12_new_al["B1"][1]],
+#          "-g", label="r41 (model)")
+
+# # ===== MODEL: SYSTEM 2 (aligned) =====
+# plt.plot([pts12_new_al["O2_2"][0], pts12_new_al["O4_2"][0]],
+#          [pts12_new_al["O2_2"][1], pts12_new_al["O4_2"][1]],
+#          "-r", lw=2, label="r12 (model)")
+# plt.plot([pts12_new_al["O2_2"][0], pts12_new_al["A2"][0]],
+#          [pts12_new_al["O2_2"][1], pts12_new_al["A2"][1]],
+#          "-m", label="r22 (model)")
+# plt.plot([pts12_new_al["A2"][0], pts12_new_al["B2"][0]],
+#          [pts12_new_al["A2"][1], pts12_new_al["B2"][1]],
+#          "--m", label="r32 (model)")
+# plt.plot([pts12_new_al["O4_2"][0], pts12_new_al["B2"][0]],
+#          [pts12_new_al["O4_2"][1], pts12_new_al["B2"][1]],
+#          "-c", label="r42 (model)")
+
+# # coupler 1 (P1–P2)
+# plt.plot([pts12_new_al["P1"][0], pts12_new_al["P2"][0]],
+#          [pts12_new_al["P1"][1], pts12_new_al["P2"][1]],
+#          "-.", color="orange", label="c1 (model)")
+
+# # ===== MODEL: SYSTEM 3 (aligned) =====
+# plt.plot([pts3_new_al["O2_3"][0], pts3_new_al["O4_3"][0]],
+#          [pts3_new_al["O2_3"][1], pts3_new_al["O4_3"][1]],
+#          "-y", lw=2, label="r13 (model)")
+# plt.plot([pts3_new_al["O2_3"][0], pts3_new_al["A3"][0]],
+#          [pts3_new_al["O2_3"][1], pts3_new_al["A3"][1]],
+#          "-g", label="r23 (model)")
+# plt.plot([pts3_new_al["A3"][0], pts3_new_al["B3"][0]],
+#          [pts3_new_al["A3"][1], pts3_new_al["B3"][1]],
+#          "--g", label="r33 (model)")
+# plt.plot([pts3_new_al["O4_3"][0], pts3_new_al["B3"][0]],
+#          [pts3_new_al["O4_3"][1], pts3_new_al["B3"][1]],
+#          "-b", label="r43 (model)")
+
+# # coupler 2 (C2L–C2R)
+# plt.plot([pts3_new_al["C2L"][0], pts3_new_al["C2R"][0]],
+#          [pts3_new_al["C2L"][1], pts3_new_al["C2R"][1]],
+#          "--", color="brown", label="c2 (model)")
+
+# # ===== MODEL: SYSTEM 4 (aligned) =====
+# plt.plot([pts4_new_al["O2_4"][0], pts4_new_al["O4_4"][0]],
+#          [pts4_new_al["O2_4"][1], pts4_new_al["O4_4"][1]],
+#          "-k", lw=2, label="r14 (model)")
+# plt.plot([pts4_new_al["O2_4"][0], pts4_new_al["A4"][0]],
+#          [pts4_new_al["O2_4"][1], pts4_new_al["A4"][1]],
+#          "-r", label="r24 (model)")
+# plt.plot([pts4_new_al["A4"][0], pts4_new_al["B4"][0]],
+#          [pts4_new_al["A4"][1], pts4_new_al["B4"][1]],
+#          "--r", label="r34 (model)")
+# plt.plot([pts4_new_al["O4_4"][0], pts4_new_al["B4"][0]],
+#          [pts4_new_al["O4_4"][1], pts4_new_al["B4"][1]],
+#          "-g", label="r44 (model)")
+
+# # coupler 3 (P3–P4)
+# plt.plot([pts3_new_al["P3"][0], pts4_new_al["P4"][0]],
+#          [pts3_new_al["P3"][1], pts4_new_al["P4"][1]],
+#          "-.", color="purple", label="c3 (model)")
+
+# # ===== SECOND POINT CLOUD (measured) =====
 # for mech in four_bar_linkages_new:
 #     for line in mech:
 #         x1, y1, x2, y2 = line
-#         plt.plot([x1, x2], [y1, y2], color="0.7", lw=4)
+#         plt.plot([x1, x2], [y1, y2], color="0.7", lw=2)
 
 # for line in coupler_links_new:
 #     x1, y1, x2, y2 = line
-#     plt.plot([x1, x2], [y1, y2], color="0.5", lw=4, linestyle="--")
-
-
-# # --- model, system 1 (aligned) ---
-# plt.plot([pts12_new_al["O2_1"][0], pts12_new_al["O4_1"][0]],
-#          [pts12_new_al["O2_1"][1], pts12_new_al["O4_1"][1]],
-#          "-b", label="model r11")
-# plt.plot([pts12_new_al["O2_1"][0], pts12_new_al["A1"][0]],
-#          [pts12_new_al["O2_1"][1], pts12_new_al["A1"][1]],
-#          "-g", label="model r21")
-
-# # (optional) add the other links of the model as well:
-# plt.plot([pts12_new_al["O4_1"][0], pts12_new_al["B1"][0]],
-#          [pts12_new_al["O4_1"][1], pts12_new_al["B1"][1]], "-g", alpha=0.5, lw=1.5, label="model r41")
-# plt.plot([pts12_new_al["A1"][0], pts12_new_al["B1"][0]],
-#          [pts12_new_al["A1"][1], pts12_new_al["B1"][1]], "--b", alpha=0.5, lw=1.5, label="model r31")
-
+#     plt.plot([x1, x2], [y1, y2], color="0.5", lw=2, linestyle="--")
 
 # plt.axis("equal")
 # plt.grid(True, ls=":")
-# plt.legend()
+# plt.legend(loc="upper right", fontsize=8)
 # plt.tight_layout()
 # plt.show()
+# # # ----------------------------------------------------------------
+# # #  Plot: model (aligned) vs second point cloud
+# # # ----------------------------------------------------------------
+# # plt.figure()
+# # plt.title("Model prediction vs second point cloud")
+
+# # # --- plot NEW point cloud in gray ---
+# # for mech in four_bar_linkages_new:
+# #     for line in mech:
+# #         x1, y1, x2, y2 = line
+# #         plt.plot([x1, x2], [y1, y2], color="0.7", lw=4)
+
+# # for line in coupler_links_new:
+# #     x1, y1, x2, y2 = line
+# #     plt.plot([x1, x2], [y1, y2], color="0.5", lw=4, linestyle="--")
+
+
+# # # --- model, system 1 (aligned) ---
+# # plt.plot([pts12_new_al["O2_1"][0], pts12_new_al["O4_1"][0]],
+# #          [pts12_new_al["O2_1"][1], pts12_new_al["O4_1"][1]],
+# #          "-b", label="model r11")
+# # plt.plot([pts12_new_al["O2_1"][0], pts12_new_al["A1"][0]],
+# #          [pts12_new_al["O2_1"][1], pts12_new_al["A1"][1]],
+# #          "-g", label="model r21")
+
+# # # (optional) add the other links of the model as well:
+# # plt.plot([pts12_new_al["O4_1"][0], pts12_new_al["B1"][0]],
+# #          [pts12_new_al["O4_1"][1], pts12_new_al["B1"][1]], "-g", alpha=0.5, lw=1.5, label="model r41")
+# # plt.plot([pts12_new_al["A1"][0], pts12_new_al["B1"][0]],
+# #          [pts12_new_al["A1"][1], pts12_new_al["B1"][1]], "--b", alpha=0.5, lw=1.5, label="model r31")
+
+
+# # plt.axis("equal")
+# # plt.grid(True, ls=":")
+# # plt.legend()
+# # plt.tight_layout()
+# # plt.show()
